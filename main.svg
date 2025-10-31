@@ -1,0 +1,84 @@
+<svg width="200" height="80" viewBox="0 0 200 80" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="professionalGradient" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" style="stop-color:#00a8ff;stop-opacity:1" />
+      <stop offset="100%" style="stop-color:#8c52ff;stop-opacity:1" />
+    </linearGradient>
+    
+    <linearGradient id="shieldGradient" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" style="stop-color:#00a8ff;stop-opacity:1" />
+      <stop offset="100%" style="stop-color:#8c52ff;stop-opacity:1" />
+    </linearGradient>
+    
+    <filter id="subtleGlow" x="-20%" y="-20%" width="140%" height="140%">
+      <feGaussianBlur in="SourceGraphic" stdDeviation="1" result="blur"/>
+      <feColorMatrix in="blur" mode="matrix" values="1 0 0 0 0  0 1 0 0 0  0 0 1 0 0  0 0 0 18 -7" result="glow"/>
+      <feComposite in="SourceGraphic" in2="glow" operator="over"/>
+    </filter>
+  </defs>
+
+  <!-- Logo Icon -->
+  <g transform="translate(10, 15)">
+    <!-- Shield Base -->
+    <path d="M25 10 L35 5 L45 10 L45 25 L35 30 L25 25 Z" 
+          fill="url(#shieldGradient)" 
+          stroke="#0a0a0a" 
+          stroke-width="0.5"
+          filter="url(#subtleGlow)"/>
+    
+    <!-- Circuit Pattern -->
+    <path d="M30 12 L40 12 M30 16 L40 16 M35 10 L35 25" 
+          stroke="#0a0a0a" 
+          stroke-width="0.8" 
+          stroke-linecap="round"/>
+    
+    <!-- Central Protection Dot -->
+    <circle cx="35" cy="18" r="2" fill="#0a0a0a"/>
+    
+    <!-- Security Lines -->
+    <path d="M28 8 L32 5 L38 5 L42 8" 
+          stroke="url(#shieldGradient)" 
+          stroke-width="1.5" 
+          stroke-linecap="round" 
+          fill="none"/>
+  </g>
+
+  <!-- Company Name -->
+  <g transform="translate(60, 25)">
+    <!-- DEEPPATCH Text -->
+    <text x="0" y="0" 
+          font-family="'Arial', 'Segoe UI', sans-serif" 
+          font-size="24" 
+          font-weight="700" 
+          letter-spacing="1"
+          fill="url(#professionalGradient)">
+      DEEP
+    </text>
+    
+    <text x="0" y="25" 
+          font-family="'Arial', 'Segoe UI', sans-serif" 
+          font-size="24" 
+          font-weight="700" 
+          letter-spacing="1"
+          fill="url(#professionalGradient)">
+      PATCH
+    </text>
+    
+    <!-- Security Tagline -->
+    <text x="0" y="42" 
+          font-family="'Arial', 'Segoe UI', sans-serif" 
+          font-size="10" 
+          font-weight="500" 
+          letter-spacing="2"
+          fill="#888" 
+          text-transform="uppercase">
+      SECURITY PLATFORM
+    </text>
+  </g>
+
+  <!-- Professional Accent Line -->
+  <line x1="60" y1="50" x2="190" y2="50" 
+        stroke="url(#professionalGradient)" 
+        stroke-width="2" 
+        stroke-linecap="round"/>
+</svg>
