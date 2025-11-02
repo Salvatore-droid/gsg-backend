@@ -1,0 +1,39 @@
+{
+  "manifest_version": 2,
+  "name": "GG Security Recorder",
+  "version": "1.0.0",
+  "description": "Record user sessions for security vulnerability analysis",
+  "permissions": [
+    "activeTab",
+    "storage",
+    "http://*/*",
+    "https://*/*"
+  ],
+  "background": {
+    "scripts": [
+      "background.js"
+    ],
+    "persistent": false
+  },
+  "content_scripts": [
+    {
+      "matches": [
+        "http://*/*",
+        "https://*/*"
+      ],
+      "js": [
+        "content.js"
+      ],
+      "run_at": "document_end"
+    }
+  ],
+  "browser_action": {
+    "default_popup": "popup.html",
+    "default_title": "GG Security Recorder"
+  },
+  "icons": {
+    "16": "icons/icon16.png",
+    "48": "icons/icon48.png",
+    "128": "icons/icon128.png"
+  }
+}

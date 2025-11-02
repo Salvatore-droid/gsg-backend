@@ -1,0 +1,40 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <style>
+        body { width: 320px; padding: 16px; font-family: Arial, sans-serif; background: #1a1a1a; color: white; margin: 0; }
+        .status { padding: 12px; border-radius: 6px; margin-bottom: 12px; text-align: center; font-weight: bold; border: 1px solid; }
+        .recording { background: #d4edda; color: #155724; border-color: #155724; }
+        .stopped { background: #f8d7da; color: #721c24; border-color: #721c24; }
+        .connected { background: #d1ecf1; color: #0c5460; border-color: #0c5460; }
+        button { width: 100%; padding: 10px; margin: 6px 0; border: none; border-radius: 6px; cursor: pointer; font-weight: bold; }
+        .btn-start { background: #28a745; color: white; }
+        .btn-stop { background: #dc3545; color: white; }
+        .btn-auth { background: #007bff; color: white; }
+        input { width: 100%; padding: 8px; margin: 4px 0; border: 1px solid #555; border-radius: 4px; background: #2a2a2a; color: white; box-sizing: border-box; }
+        .section { margin: 12px 0; padding: 12px; background: rgba(255,255,255,0.1); border-radius: 6px; }
+    </style>
+</head>
+<body>
+    <div style="text-align: center; margin-bottom: 16px;">
+        <h3 style="margin: 0; color: #00f0ff;">🛡️ GG Security</h3>
+    </div>
+    
+    <div id="status" class="status stopped">Not Connected</div>
+    
+    <div class="section">
+        <h4 style="margin: 0 0 8px 0;">Authentication</h4>
+        <input type="text" id="backend-url" placeholder="Backend URL" value="http://localhost:8000">
+        <input type="text" id="auth-token" placeholder="Enter auth token">
+        <button id="save-settings" class="btn-auth">Save Settings</button>
+    </div>
+    
+    <div class="section">
+        <button id="start-recording" class="btn-start">Start Recording</button>
+        <button id="stop-recording" class="btn-stop" disabled>Stop Recording</button>
+    </div>
+    
+    <script src="popup.js"></script>
+</body>
+</html>

@@ -7,6 +7,7 @@ from django.utils import timezone
 from django.conf import settings
 from django.core.cache import cache
 import asyncio
+import re
 import logging
 from .models import ScanTarget, ScanResult, Vulnerability, ThreatIntelligence, GlobalStats
 from .serializers import (
@@ -19,6 +20,196 @@ from .utils.security_tools import SecurityScanner
 from .utils.threat_intelligence import ThreatIntelligenceService
 
 logger = logging.getLogger(__name__)
+
+from rest_framework.permissions import IsAuthenticated, AllowAny
+from rest_framework.views import APIView
+from django.contrib.auth import get_user_model
+
+User = get_user_model()
+
+from rest_framework.decorators import api_view, permission_classes
+from rest_framework.response import Response
+from rest_framework import status
+from rest_framework.permissions import AllowAny
+from django.contrib.auth import authenticate
+from django.contrib.auth.models import User
+import jwt
+from datetime import datetime, timedelta
+from django.conf import settings
+
+@api_view(['POST'])
+@permission_classes([AllowAny])
+def login_view(request):
+    username = request.data.get('username')
+    password = request.data.get('password')
+    
+    print(f"Login attempt for user: {username}")  # Debug log
+    
+    # Input validation
+    if not username or not password:
+        return Response(
+            {'detail': 'Username and password are required'}, 
+            status=status.HTTP_400_BAD_REQUEST
+        )
+    
+    # Authenticate user
+    user = authenticate(request, username=username, password=password)
+    
+    if user is not None:
+        if user.is_active:
+            # Create JWT token
+            payload = {
+                'user_id': user.id,
+                'username': user.username,
+                'exp': datetime.utcnow() + timedelta(days=7),
+                'iat': datetime.utcnow()
+            }
+            
+            # Ensure SECRET_KEY is available
+            if not settings.SECRET_KEY:
+                return Response(
+                    {'detail': 'Server configuration error'}, 
+                    status=status.HTTP_500_INTERNAL_SERVER_ERROR
+                )
+            
+            token = jwt.encode(payload, settings.SECRET_KEY, algorithm='HS256')
+            
+            # Return user data and token
+            return Response({
+                'user': {
+                    'id': user.id,
+                    'username': user.username,
+                    'email': user.email,
+                    'first_name': user.first_name,
+                    'last_name': user.last_name
+                },
+                'access': token,
+                'message': 'Login successful'
+            })
+        else:
+            return Response(
+                {'detail': 'Account is disabled'}, 
+                status=status.HTTP_403_FORBIDDEN
+            )
+    else:
+        print(f"Authentication failed for user: {username}")  # Debug log
+        return Response(
+            {'detail': 'Invalid username or password'}, 
+            status=status.HTTP_401_UNAUTHORIZED
+        )
+
+@api_view(['POST'])
+@permission_classes([AllowAny])
+def register_view(request):
+    """
+    User registration endpoint
+    """
+    try:
+        username = request.data.get('username', '').strip()
+        email = request.data.get('email', '').strip()
+        password = request.data.get('password', '')
+        first_name = request.data.get('first_name', '').strip()
+        last_name = request.data.get('last_name', '').strip()
+        
+        print(f"Registration attempt for user: {username}, email: {email}")  # Debug log
+        
+        # Validation
+        if not username or not email or not password:
+            return Response(
+                {'detail': 'Username, email and password are required'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        
+        if len(password) < 6:
+            return Response(
+                {'detail': 'Password must be at least 6 characters'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        
+        if not re.match(r'^[\w\.-]+@[\w\.-]+\.\w+$', email):
+            return Response(
+                {'detail': 'Please enter a valid email address'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        
+        # Check if user already exists
+        if User.objects.filter(username=username).exists():
+            return Response(
+                {'detail': 'Username already exists'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        
+        if User.objects.filter(email=email).exists():
+            return Response(
+                {'detail': 'Email already exists'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        
+        # Create user
+        user = User.objects.create_user(
+            username=username,
+            email=email,
+            password=password,
+            first_name=first_name,
+            last_name=last_name
+        )
+        
+        print(f"User created successfully: {user.username}")  # Debug log
+        
+        # Create JWT token (using the same method as login)
+        payload = {
+            'user_id': user.id,
+            'username': user.username,
+            'exp': datetime.utcnow() + timedelta(days=7),
+            'iat': datetime.utcnow()
+        }
+        
+        token = jwt.encode(payload, settings.SECRET_KEY, algorithm='HS256')
+        
+        return Response({
+            'user': {
+                'id': user.id,
+                'username': user.username,
+                'email': user.email,
+                'first_name': user.first_name,
+                'last_name': user.last_name
+            },
+            'access': token,
+            'message': 'Registration successful'
+        }, status=status.HTTP_201_CREATED)
+        
+    except Exception as e:
+        logger.error(f"Registration error: {str(e)}")
+        import traceback
+        print(f"Full error traceback: {traceback.format_exc()}")  # Debug log
+        return Response(
+            {'detail': f'Registration failed: {str(e)}'},
+            status=status.HTTP_500_INTERNAL_SERVER_ERROR
+        )
+
+@api_view(['GET'])
+@permission_classes([AllowAny])
+def health_check(request):
+    return Response({'status': 'OK', 'service': 'Genius Guard API'})
+
+@api_view(['GET'])
+def get_csrf_token(request):
+    return Response({'csrfToken': get_token(request)})
+
+
+class CurrentUserView(APIView):
+    permission_classes = [IsAuthenticated]
+    
+    def get(self, request):
+        user = request.user
+        return Response({
+            'id': user.id,
+            'username': user.username,
+            'email': user.email,
+            'first_name': user.first_name,
+            'last_name': user.last_name
+        })
+
 
 class ScanTargetViewSet(viewsets.ModelViewSet):
     queryset = ScanTarget.objects.all().order_by('-created_at')
@@ -800,3 +991,19 @@ class VulnerabilityListView(generics.ListAPIView):
         return Vulnerability.objects.filter(
             scan_result__target__user=self.request.user
         ).order_by('-scan_result__started_at')
+
+# In base/views.py - add this view
+from rest_framework.decorators import api_view
+from rest_framework.response import Response
+from django.utils import timezone
+
+@api_view(['GET'])
+@permission_classes([AllowAny])
+def health_check(request):
+    """Simple health check endpoint"""
+    return Response({
+        'status': 'healthy',
+        'service': 'GeniusGuard API',
+        'timestamp': timezone.now().isoformat(),
+        'version': '1.0.0'
+    })

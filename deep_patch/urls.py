@@ -28,20 +28,18 @@ urlpatterns = [
     # Admin
     path('admin/', admin.site.urls),
     
-    # API Routes
-    path('api/', include('base.urls')),
-    
     # API Documentation
     path('swagger/', schema_view.with_ui('swagger', cache_timeout=0), name='schema-swagger-ui'),
     path('redoc/', schema_view.with_ui('redoc', cache_timeout=0), name='schema-redoc'),
+
+    path('api/', include('base.urls')),
+    path('api/deep/', include('deepscan.urls')),
     
     # Frontend Routes - Catch all to Vue.js
     path('', TemplateView.as_view(template_name='index.html'), name='home'),
     path('deep-scan/', TemplateView.as_view(template_name='index.html'), name='deep-scan'),
     path('dashboard/', TemplateView.as_view(template_name='index.html'), name='dashboard'),
     
-    # Auth routes (if you add authentication)
-    path('api/auth/', include('rest_framework.urls')),
 ]
 
 # Serve static files in development
