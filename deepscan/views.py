@@ -13,7 +13,10 @@ from django.core.cache import cache
 from django.contrib.auth import get_user_model
 from django.core.exceptions import ObjectDoesNotExist 
 import uuid
+import jwt
 import logging
+from django.conf import settings
+from .authentication import JWTAuthentication, SessionOrJWTAuthentication
 
 from .models import (
     DeepScanSession, ScanModule, DeepScanFinding,
@@ -26,52 +29,57 @@ logger = logging.getLogger(__name__)
 User = get_user_model()
 
 # Utility functions for authentication
-def validate_auth_token(token_string):
+def validate_jwt_token(token_string):
     """
-    Safely validate authentication token - works even if Token model is not available
+    Validate JWT token used by GeniusGuard
     """
     try:
         if not token_string:
             return None
             
-        # Try to import Token model safely
-        try:
-            from rest_framework.authtoken.models import Token
-            # Try to get token from database
-            token = Token.objects.select_related('user').get(key=token_string)
-            return token.user
-        except ImportError:
-            logger.warning("DRF Token model not available")
-            return None
-        except ObjectDoesNotExist:
-            logger.warning(f"Token not found: {token_string}")
+        payload = jwt.decode(token_string, settings.SECRET_KEY, algorithms=['HS256'])
+        user_id = payload.get('user_id')
+        
+        if not user_id:
             return None
             
+        user = User.objects.get(id=user_id)
+        return user
+        
+    except jwt.ExpiredSignatureError:
+        logger.warning("JWT token expired")
+        return None
+    except jwt.InvalidTokenError:
+        logger.warning("Invalid JWT token")
+        return None
+    except User.DoesNotExist:
+        logger.warning(f"User not found in JWT token")
+        return None
     except Exception as e:
-        logger.error(f"Token validation error: {str(e)}")
+        logger.error(f"JWT validation error: {str(e)}")
         return None
 
 def get_user_from_request(request):
     """
-    Safely get user from request with fallbacks
+    Get user from request - supports both session and JWT
     """
-    # Try authenticated user first (this should work with SessionAuthentication)
+    # Primary: Session authentication
     if hasattr(request, 'user') and request.user.is_authenticated:
         return request.user
     
-    # Try token authentication
+    # Secondary: JWT token authentication
     auth_header = request.headers.get('Authorization', '')
     if auth_header.startswith('Bearer '):
         token = auth_header[7:]
-        user = validate_auth_token(token)
+        user = validate_jwt_token(token)
         if user:
             return user
     
-    # Try session authentication
+    # Fallback: Session user_id
     if hasattr(request, 'session') and 'user_id' in request.session:
         try:
             return User.objects.get(id=request.session['user_id'])
-        except User.DoesNotExist:
+        except (User.DoesNotExist, KeyError):
             pass
     
     return None
@@ -79,33 +87,32 @@ def get_user_from_request(request):
 class DeepScanSessionViewSet(viewsets.ModelViewSet):
     queryset = DeepScanSession.objects.all().order_by('-created_at')
     serializer_class = DeepScanSessionSerializer
-    authentication_classes = [TokenAuthentication, SessionAuthentication]
-    permission_classes = [IsAuthenticated]
+    authentication_classes = [SessionOrJWTAuthentication]
+    permission_classes = [IsAuthenticated]  # Keep this for protected endpoints
     
     def get_queryset(self):
-        # Only return sessions for the authenticated user
-        if self.request.user.is_authenticated:
-            return self.queryset.filter(user=self.request.user)
+        user = get_user_from_request(self.request)
+        if user and user.is_authenticated:
+            return self.queryset.filter(user=user)
         return self.queryset.none()
     
     def perform_create(self, serializer):
-        if self.request.user.is_authenticated:
-            # Get target from request data or use a default
-            target_id = self.request.data.get('target')
-            if target_id:
-                try:
-                    target = ScanTarget.objects.get(id=target_id)
-                    serializer.save(user=self.request.user, target=target)
-                except ScanTarget.DoesNotExist:
-                    from rest_framework import serializers
-                    raise serializers.ValidationError("Invalid target ID")
-            else:
-                # Create with a default target or handle error
+        user = get_user_from_request(self.request)
+        if not user or not user.is_authenticated:
+            from rest_framework import serializers
+            raise serializers.ValidationError("Authentication required")
+            
+        target_id = self.request.data.get('target')
+        if target_id:
+            try:
+                target = ScanTarget.objects.get(id=target_id)
+                serializer.save(user=user, target=target)
+            except ScanTarget.DoesNotExist:
                 from rest_framework import serializers
-                raise serializers.ValidationError("Target is required")
+                raise serializers.ValidationError("Invalid target ID")
         else:
             from rest_framework import serializers
-            raise serializers.ValidationError("User must be authenticated")
+            raise serializers.ValidationError("Target is required")
     
     @action(detail=True, methods=['post'])
     def start_recording(self, request, pk=None):
@@ -361,7 +368,7 @@ class DeepScanSessionViewSet(viewsets.ModelViewSet):
 class RecordedActionViewSet(viewsets.ModelViewSet):
     queryset = RecordedAction.objects.all().order_by('timestamp')
     serializer_class = RecordedActionCreateSerializer
-    authentication_classes = [TokenAuthentication, SessionAuthentication]
+    authentication_classes = [SessionOrJWTAuthentication]  # Use combined auth
     permission_classes = [IsAuthenticated]
     
     def get_queryset(self):
@@ -408,7 +415,7 @@ class RecordedActionViewSet(viewsets.ModelViewSet):
 class DeepScanFindingViewSet(viewsets.ReadOnlyModelViewSet):
     queryset = DeepScanFinding.objects.all().order_by('-cvss_score', '-detected_at')
     serializer_class = DeepScanFindingSerializer
-    authentication_classes = [TokenAuthentication, SessionAuthentication]
+    authentication_classes = [SessionOrJWTAuthentication]  # Use combined auth
     permission_classes = [IsAuthenticated]
     
     def get_queryset(self):
@@ -419,7 +426,7 @@ class DeepScanFindingViewSet(viewsets.ReadOnlyModelViewSet):
 class ScanModuleViewSet(viewsets.ReadOnlyModelViewSet):
     queryset = ScanModule.objects.all().order_by('started_at')
     serializer_class = ScanModuleSerializer
-    authentication_classes = [TokenAuthentication, SessionAuthentication]
+    authentication_classes = [SessionOrJWTAuthentication]  # Use combined auth
     permission_classes = [IsAuthenticated]
     
     def get_queryset(self):
@@ -427,9 +434,10 @@ class ScanModuleViewSet(viewsets.ReadOnlyModelViewSet):
             return self.queryset.filter(session__user=self.request.user)
         return self.queryset.none()
 
+
 class DeepScanProgressView(APIView):
     """Get real-time scan progress"""
-    authentication_classes = [TokenAuthentication, SessionAuthentication]
+    authentication_classes = [SessionOrJWTAuthentication]  # Use combined auth
     permission_classes = [IsAuthenticated]
     
     def get(self, request, session_id):
@@ -485,7 +493,7 @@ class DeepScanProgressView(APIView):
 class DeepScanReportViewSet(viewsets.ReadOnlyModelViewSet):
     queryset = DeepScanReport.objects.all().order_by('-generated_at')
     serializer_class = DeepScanReportSerializer
-    authentication_classes = [TokenAuthentication, SessionAuthentication]
+    authentication_classes = [SessionOrJWTAuthentication]  # Use combined auth
     permission_classes = [IsAuthenticated]
     
     def get_queryset(self):
@@ -514,32 +522,35 @@ class DeepScanReportViewSet(viewsets.ReadOnlyModelViewSet):
         })
 
 @api_view(['POST'])
-@permission_classes([AllowAny])
+@permission_classes([AllowAny])  # Allow any for extension connection
 def extension_connect(request):
-    """Handle extension connection with robust auth handling"""
+    """Handle extension connection - supports JWT and session auth"""
     try:
         extension_data = request.data
-        
-        # Extract session token from headers or data
-        auth_header = request.headers.get('Authorization', '')
-        auth_token = None
-        
-        if auth_header.startswith('Bearer '):
-            auth_token = auth_header[7:]
-        else:
-            auth_token = extension_data.get('auth_token')
         
         user = None
         authenticated = False
         
-        # Validate token if provided
-        if auth_token:
-            user = validate_auth_token(auth_token)
-            if user:
-                authenticated = True
-                logger.info(f"User authenticated via token: {user.username}")
+        # Try to get user from request without forcing authentication
+        if hasattr(request, 'user') and request.user.is_authenticated:
+            user = request.user
+            authenticated = True
+            logger.info(f"User authenticated via session: {user.username}")
+        else:
+            # Try JWT token authentication
+            auth_header = request.headers.get('Authorization', '')
+            auth_token = None
+            
+            if auth_header.startswith('Bearer '):
+                auth_token = auth_header[7:]
             else:
-                logger.warning("Token validation failed")
+                auth_token = extension_data.get('auth_token')
+            
+            if auth_token:
+                user = validate_jwt_token(auth_token)
+                if user:
+                    authenticated = True
+                    logger.info(f"User authenticated via JWT: {user.username}")
         
         # Create extension session
         session_id = extension_data.get('session_id', str(uuid.uuid4()))
@@ -570,20 +581,26 @@ def extension_connect(request):
             'status': 'connected',
             'session_id': extension_session.session_id,
             'authenticated': authenticated,
-            'message': 'Extension connected successfully'
+            'user': {
+                'username': user.username if user else 'demo_user',
+                'authenticated': authenticated
+            } if user else None
         })
         
     except Exception as e:
         logger.error(f"Extension connection error: {str(e)}")
         return Response({
-            'status': 'error',
-            'message': 'Connection failed - please try again'
-        }, status=400)
+            'status': 'connected',
+            'session_id': str(uuid.uuid4()),
+            'authenticated': False,
+            'message': 'Extension connected in demo mode'
+        })
 
+# Update the get_user_info view
 @api_view(['GET'])
-@permission_classes([AllowAny])
+@permission_classes([AllowAny])  # Allow any for user info
 def get_user_info(request):
-    """Get user info with proper fallbacks"""
+    """Get user info - supports both session and JWT auth"""
     try:
         user = get_user_from_request(request)
         
@@ -596,7 +613,7 @@ def get_user_info(request):
                 'authenticated': True
             })
         else:
-            # Return anonymous user data
+            # Return demo data for unauthenticated users
             return Response({
                 'username': 'security_analyst',
                 'email': 'analyst@geniusguard.com',
@@ -608,9 +625,9 @@ def get_user_info(request):
     except Exception as e:
         logger.error(f"User info error: {str(e)}")
         return Response({
-            'username': 'security_user',
-            'email': 'user@geniusguard.com',
-            'first_name': 'Security',
+            'username': 'demo_user',
+            'email': 'demo@geniusguard.com',
+            'first_name': 'Demo',
             'last_name': 'User',
             'authenticated': False
         })
