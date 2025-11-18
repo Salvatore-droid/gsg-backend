@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
-  "name": "GG Security Recorder",
+  "name": "GENIUSGAURD Security Scanner",
   "version": "1.0.0",
-  "description": "Record user sessions for security vulnerability analysis",
+  "description": "Record user sessions for security vulnerability scanning",
   "permissions": [
     "activeTab",
     "storage",
@@ -17,19 +17,14 @@
   },
   "content_scripts": [
     {
-      "matches": [
-        "http://*/*",
-        "https://*/*"
-      ],
-      "js": [
-        "content.js"
-      ],
+      "matches": ["<all_urls>"],
+      "js": ["content-script.js"],
       "run_at": "document_end"
     }
   ],
   "action": {
     "default_popup": "popup.html",
-    "default_title": "GG Security Recorder"
+    "default_title": "GENIUSGAURD Security"
   },
   "icons": {
     "16": "icons/icon16.png",

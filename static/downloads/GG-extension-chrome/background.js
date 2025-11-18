@@ -1,127 +1,112 @@
-let recordingSessions = new Map();
+// Background script for GENIUSGAURD extension
 let currentSession = null;
+let isRecording = false;
 
+// Handle extension installation
+chrome.runtime.onInstalled.addListener(() => {
+  console.log('GENIUSGAURD Security Extension installed');
+});
+
+// Handle messages from content scripts and popup
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
-    console.log('Background received:', request.action);
-    
-    switch (request.action) {
-        case 'startRecording':
-            startRecording(request.sessionId);
-            sendResponse({ status: 'recording_started' });
-            break;
-        case 'stopRecording':
-            stopRecording();
-            sendResponse({ status: 'recording_stopped' });
-            break;
-        case 'getRecordingStatus':
-            sendResponse({ 
-                isRecording: currentSession !== null,
-                sessionId: currentSession 
-            });
-            break;
-        case 'recordAction':
-            if (currentSession) recordAction(request.data);
-            break;
-        case 'checkConnection':
-            sendResponse({ status: 'connected', version: '1.0.0' });
-            break;
-    }
-    return true;
+  console.log('Background received message:', request);
+  
+  switch (request.action) {
+    case 'PING':
+      sendResponse({ connected: true, version: '1.0.0' });
+      break;
+      
+    case 'START_RECORDING':
+      startRecording(request.sessionId);
+      sendResponse({ status: 'recording_started', sessionId: request.sessionId });
+      break;
+      
+    case 'STOP_RECORDING':
+      stopRecording();
+      sendResponse({ status: 'recording_stopped' });
+      break;
+      
+    case 'GET_STATUS':
+      sendResponse({ 
+        isRecording, 
+        sessionId: currentSession,
+        connected: true,
+        version: '1.0.0'
+      });
+      break;
+      
+    case 'RECORD_ACTION':
+      if (isRecording && currentSession) {
+        recordActionToBackend(request.actionData);
+      }
+      sendResponse({ status: 'action_received' });
+      break;
+  }
+  
+  return true; // Keep message channel open for async responses
 });
 
 function startRecording(sessionId) {
-    currentSession = sessionId;
-    recordingSessions.set(sessionId, {
-        startTime: Date.now(),
-        actions: [],
-        metadata: { 
-            userAgent: navigator.userAgent, 
-            platform: navigator.platform,
-            timestamp: new Date().toISOString()
-        }
+  console.log('Starting recording for session:', sessionId);
+  currentSession = sessionId;
+  isRecording = true;
+  
+  // Notify all tabs to start recording
+  chrome.tabs.query({}, (tabs) => {
+    tabs.forEach(tab => {
+      chrome.tabs.sendMessage(tab.id, {
+        action: 'START_RECORDING',
+        sessionId: sessionId
+      }).catch(err => {
+        console.log('Could not notify tab:', tab.id, err);
+      });
     });
-    
-    chrome.tabs.query({}, (tabs) => {
-        tabs.forEach(tab => {
-            chrome.tabs.sendMessage(tab.id, { 
-                action: 'startRecording', 
-                sessionId: sessionId 
-            }).catch(err => {
-                console.log('Tab not ready:', tab.id);
-            });
-        });
-    });
+  });
 }
 
 function stopRecording() {
-    if (currentSession) {
-        const session = recordingSessions.get(currentSession);
-        if (session) {
-            sendRecordedData(session);
-        }
-        recordingSessions.delete(currentSession);
-        currentSession = null;
-    }
+  console.log('Stopping recording');
+  isRecording = false;
+  currentSession = null;
+  
+  // Notify all tabs to stop recording
+  chrome.tabs.query({}, (tabs) => {
+    tabs.forEach(tab => {
+      chrome.tabs.sendMessage(tab.id, {
+        action: 'STOP_RECORDING'
+      }).catch(err => {
+        console.log('Could not notify tab:', tab.id, err);
+      });
+    });
+  });
+}
+
+async function recordActionToBackend(actionData) {
+  try {
+    console.log('Recording action:', actionData.action_type);
     
-    chrome.tabs.query({}, (tabs) => {
-        tabs.forEach(tab => {
-            chrome.tabs.sendMessage(tab.id, { 
-                action: 'stopRecording' 
-            }).catch(err => {
-                console.log('Tab not ready:', tab.id);
-            });
-        });
+    const response = await fetch('http://localhost:8000/api/deep/recorded-actions/bulk/', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        session_id: currentSession,
+        actions: [actionData],
+        metadata: {
+          user_agent: navigator.userAgent,
+          timestamp: new Date().toISOString(),
+          extension_version: '1.0.0'
+        }
+      })
     });
-}
-
-function recordAction(actionData) {
-    if (currentSession) {
-        const session = recordingSessions.get(currentSession);
-        if (session) {
-            session.actions.push({
-                ...actionData,
-                absoluteTimestamp: Date.now(),
-                relativeTimestamp: Date.now() - session.startTime
-            });
-        }
+    
+    if (!response.ok) {
+      console.error('Failed to record action:', await response.text());
+    } else {
+      console.log('Action recorded successfully');
     }
-}
-
-async function sendRecordedData(session) {
-    try {
-        const authToken = await getAuthToken();
-        if (!authToken) {
-            console.error('No auth token available');
-            return;
-        }
-
-        const response = await fetch('http://localhost:8000/api/deep/recorded-actions/bulk/', {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-                'Authorization': 'Bearer ' + authToken
-            },
-            body: JSON.stringify({
-                session_id: currentSession,
-                actions: session.actions,
-                metadata: session.metadata
-            })
-        });
-        
-        if (response.ok) {
-            console.log('Data sent successfully:', session.actions.length, 'actions');
-        } else {
-            console.error('Failed to send data:', response.status);
-        }
-    } catch (error) {
-        console.error('Error sending recorded data:', error);
-    }
-}
-
-async function getAuthToken() {
-    return new Promise((resolve) => {
-        chrome.storage.local.get(['authToken'], (result) => {
-            resolve(result.authToken);
-        });
-    });
+  } catch (error) {
+    console.error('Error recording action:', error);
+  }
 }

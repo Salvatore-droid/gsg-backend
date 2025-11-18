@@ -19,8 +19,8 @@ class DeepScanSession(models.Model):
     )
     
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
-    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='deep_scan_sessions')
-    target = models.ForeignKey(ScanTarget, on_delete=models.CASCADE, related_name='deep_scans')
+    user = models.ForeignKey(User, on_delete=models.CASCADE, blank=True, null=True, related_name='deep_scan_sessions')
+    target = models.ForeignKey(ScanTarget, on_delete=models.SET_NULL, blank=True, null=True, related_name='deep_scans')
     name = models.CharField(max_length=255)
     description = models.TextField(blank=True)
     

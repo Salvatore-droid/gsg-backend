@@ -84,11 +84,17 @@ def get_user_from_request(request):
     
     return None
 
+# In deepscan/views.py - update the DeepScanSessionViewSet
+
 class DeepScanSessionViewSet(viewsets.ModelViewSet):
     queryset = DeepScanSession.objects.all().order_by('-created_at')
-    serializer_class = DeepScanSessionSerializer
     authentication_classes = [SessionOrJWTAuthentication]
-    permission_classes = [IsAuthenticated]  # Keep this for protected endpoints
+    permission_classes = [IsAuthenticated]
+    
+    def get_serializer_class(self):
+        if self.action == 'create':
+            return DeepScanSessionCreateSerializer  # Use the new serializer for creation
+        return DeepScanSessionSerializer
     
     def get_queryset(self):
         user = get_user_from_request(self.request)
@@ -101,18 +107,23 @@ class DeepScanSessionViewSet(viewsets.ModelViewSet):
         if not user or not user.is_authenticated:
             from rest_framework import serializers
             raise serializers.ValidationError("Authentication required")
-            
+        
+        # Target is now optional - get it if provided, otherwise use None
         target_id = self.request.data.get('target')
+        target = None
+        
         if target_id:
             try:
                 target = ScanTarget.objects.get(id=target_id)
-                serializer.save(user=user, target=target)
             except ScanTarget.DoesNotExist:
-                from rest_framework import serializers
-                raise serializers.ValidationError("Invalid target ID")
-        else:
-            from rest_framework import serializers
-            raise serializers.ValidationError("Target is required")
+                # Log warning but don't fail the request
+                logger.warning(f"ScanTarget with id {target_id} does not exist")
+                # Continue without target - don't raise error
+        
+        # Save with user and optional target
+        serializer.save(user=user, target=target)
+    
+    
     
     @action(detail=True, methods=['post'])
     def start_recording(self, request, pk=None):
@@ -365,6 +376,57 @@ class DeepScanSessionViewSet(viewsets.ModelViewSet):
         }
         return durations.get(session.scan_intensity, 'Unknown')
 
+    def create(self, request, *args, **kwargs):
+        """Create a session with optional recorded actions - SIMPLIFIED FLOW"""
+        user = get_user_from_request(request)
+        if not user or not user.is_authenticated:
+            return Response(
+                {'error': 'Authentication required'},
+                status=status.HTTP_401_UNAUTHORIZED
+            )
+        
+        # Create the session with simplified data
+        session_data = {
+            'user': user,
+            'name': request.data.get('name', f'Security Test {timezone.now().strftime("%Y-%m-%d %H:%M")}'),
+            'description': request.data.get('description', ''),
+            'scan_intensity': request.data.get('scan_intensity', 'standard'),
+            'status': 'ready'  # Ready for configuration after recording
+        }
+        
+        # Create the session first
+        session = DeepScanSession.objects.create(**session_data)
+        
+        # Add recorded actions if provided in the new simplified flow
+        recorded_actions = request.data.get('recorded_actions', [])
+        created_actions = []
+        
+        for action_data in recorded_actions:
+            action = RecordedAction.objects.create(
+                session=session,
+                action_type=action_data.get('action_type', 'click'),
+                target_element=action_data.get('target_element', ''),
+                target_selector=action_data.get('target_selector', ''),
+                value=action_data.get('value', ''),
+                url=action_data.get('url', ''),
+                timestamp=action_data.get('timestamp', timezone.now().timestamp()),
+                dom_snapshot=action_data.get('dom_snapshot', {})
+            )
+            created_actions.append(action.id)
+        
+        # Update session with action count
+        session.recorded_actions_count = len(created_actions)
+        session.save()
+        
+        serializer = self.get_serializer(session)
+        return Response({
+            'id': str(session.id),
+            'name': session.name,
+            'status': session.status,
+            'recorded_actions_count': len(created_actions),
+            'message': 'Session created successfully with recorded actions'
+        }, status=status.HTTP_201_CREATED)
+
 class RecordedActionViewSet(viewsets.ModelViewSet):
     queryset = RecordedAction.objects.all().order_by('timestamp')
     serializer_class = RecordedActionCreateSerializer
@@ -521,8 +583,10 @@ class DeepScanReportViewSet(viewsets.ReadOnlyModelViewSet):
             'download_url': f"/api/deep/reports/{report.id}/download/"
         })
 
+# In deepscan/views.py - fix the extension_connect function
+
 @api_view(['POST'])
-@permission_classes([AllowAny])  # Allow any for extension connection
+@permission_classes([AllowAny])
 def extension_connect(request):
     """Handle extension connection - supports JWT and session auth"""
     try:
@@ -589,12 +653,13 @@ def extension_connect(request):
         
     except Exception as e:
         logger.error(f"Extension connection error: {str(e)}")
+        # Return a safe response even if there's an error
         return Response({
             'status': 'connected',
             'session_id': str(uuid.uuid4()),
             'authenticated': False,
             'message': 'Extension connected in demo mode'
-        })
+        }, status=200)  # Always return 200 for extension connection
 
 # Update the get_user_info view
 @api_view(['GET'])
@@ -633,9 +698,11 @@ def get_user_info(request):
         })
 
 
+# In deepscan/views.py - update BrowserExtensionView
+
 class BrowserExtensionView(APIView):
     """Handle browser extension communications"""
-    authentication_classes = [TokenAuthentication, SessionAuthentication]
+    authentication_classes = [SessionOrJWTAuthentication]  # Use combined auth
     permission_classes = [IsAuthenticated]
     
     def post(self, request):
@@ -654,13 +721,16 @@ class BrowserExtensionView(APIView):
             'status': 'connected'
         })
 
+# In deepscan/views.py - update BulkRecordedActionView
+
 class BulkRecordedActionView(APIView):
-    """Bulk create recorded actions from browser extension"""
-    authentication_classes = [TokenAuthentication, SessionAuthentication]
+    """Bulk create recorded actions from browser extension - ENHANCED"""
+    authentication_classes = [SessionOrJWTAuthentication]
     permission_classes = [IsAuthenticated]
     
     def post(self, request):
-        if not request.user.is_authenticated:
+        user = get_user_from_request(request)
+        if not user or not user.is_authenticated:
             return Response(
                 {'error': 'Authentication required'},
                 status=status.HTTP_401_UNAUTHORIZED
@@ -670,11 +740,29 @@ class BulkRecordedActionView(APIView):
         actions_data = request.data.get('actions', [])
         metadata = request.data.get('metadata', {})
         
+        # If no session_id provided, create a temporary session
+        if not session_id:
+            session = DeepScanSession.objects.create(
+                user=user,
+                name='Live Recording Session',
+                status='recording',
+                recording_started_at=timezone.now()
+            )
+            session_id = str(session.id)
+        
         try:
             session = DeepScanSession.objects.get(
                 id=session_id,
-                user=request.user
+                user=user
             )
+            
+            # Ensure session is in recording state
+            if session.status != 'recording':
+                session.status = 'recording'
+                if not session.recording_started_at:
+                    session.recording_started_at = timezone.now()
+                session.save()
+            
         except DeepScanSession.DoesNotExist:
             return Response(
                 {'error': 'Scan session not found'},
@@ -690,13 +778,254 @@ class BulkRecordedActionView(APIView):
                 target_selector=action_data.get('target_selector', ''),
                 value=action_data.get('value', ''),
                 url=action_data.get('url', ''),
-                timestamp=action_data.get('timestamp', 0),
+                timestamp=action_data.get('timestamp', timezone.now().timestamp()),
                 dom_snapshot=action_data.get('dom_snapshot', {})
             )
             created_actions.append(action.id)
         
+        # Update session action count
+        session.recorded_actions_count = session.actions.count()
+        session.save()
+        
         return Response({
             'message': f'{len(created_actions)} actions recorded',
             'actions_count': len(created_actions),
-            'session_status': session.status
+            'session_id': str(session.id),
+            'session_status': session.status,
+            'total_actions': session.recorded_actions_count
         })
+
+# Add these new views to your existing views.py
+
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def start_direct_recording(request):
+    """Start recording immediately without pre-creating a session"""
+    try:
+        user = get_user_from_request(request)
+        if not user or not user.is_authenticated:
+            return Response(
+                {'error': 'Authentication required'},
+                status=status.HTTP_401_UNAUTHORIZED
+            )
+        
+        # Create a temporary session for recording
+        session = DeepScanSession.objects.create(
+            user=user,
+            name='Temporary Recording Session',
+            status='recording',
+            recording_started_at=timezone.now()
+        )
+        
+        # Initialize browser extension session
+        extension_data = request.data.get('browser_info', {})
+        extension_session = BrowserExtensionSession.objects.create(
+            user=user,
+            session_id=str(uuid.uuid4()),
+            browser_info=extension_data,
+            extension_version=extension_data.get('version', '1.0.0'),
+            is_active=True
+        )
+        
+        return Response({
+            'status': 'recording',
+            'session_id': str(session.id),
+            'extension_session_id': extension_session.session_id,
+            'message': 'Recording started successfully'
+        })
+        
+    except Exception as e:
+        logger.error(f"Direct recording start error: {str(e)}")
+        return Response(
+            {'error': 'Failed to start recording session'},
+            status=status.HTTP_500_INTERNAL_SERVER_ERROR
+        )
+
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def save_recording_session(request):
+    """Save recorded session with actions and finalize the name"""
+    try:
+        user = get_user_from_request(request)
+        if not user or not user.is_authenticated:
+            return Response(
+                {'error': 'Authentication required'},
+                status=status.HTTP_401_UNAUTHORIZED
+            )
+        
+        session_id = request.data.get('session_id')
+        session_name = request.data.get('name')
+        recorded_actions = request.data.get('recorded_actions', [])
+        
+        if not session_id or not session_name:
+            return Response(
+                {'error': 'Session ID and name are required'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        
+        # Get the temporary session
+        session = DeepScanSession.objects.get(id=session_id, user=user)
+        
+        # Update session with final name and complete recording
+        session.name = session_name
+        session.status = 'ready'
+        session.recording_completed_at = timezone.now()
+        
+        # Add recorded actions
+        created_actions = []
+        for action_data in recorded_actions:
+            action = RecordedAction.objects.create(
+                session=session,
+                action_type=action_data.get('action_type', 'click'),
+                target_element=action_data.get('target_element', ''),
+                target_selector=action_data.get('target_selector', ''),
+                value=action_data.get('value', ''),
+                url=action_data.get('url', ''),
+                timestamp=action_data.get('timestamp', timezone.now().timestamp()),
+                dom_snapshot=action_data.get('dom_snapshot', {})
+            )
+            created_actions.append(action.id)
+        
+        session.recorded_actions_count = len(created_actions)
+        session.save()
+        
+        return Response({
+            'session_id': str(session.id),
+            'name': session.name,
+            'status': session.status,
+            'recorded_actions_count': len(created_actions),
+            'message': 'Recording session saved successfully'
+        })
+        
+    except DeepScanSession.DoesNotExist:
+        return Response(
+            {'error': 'Session not found'},
+            status=status.HTTP_404_NOT_FOUND
+        )
+    except Exception as e:
+        logger.error(f"Save recording session error: {str(e)}")
+        return Response(
+            {'error': 'Failed to save recording session'},
+            status=status.HTTP_500_INTERNAL_SERVER_ERROR
+        )
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def get_recording_status(request, session_id):
+    """Get current recording status and actions count"""
+    try:
+        user = get_user_from_request(request)
+        if not user or not user.is_authenticated:
+            return Response(
+                {'error': 'Authentication required'},
+                status=status.HTTP_401_UNAUTHORIZED
+            )
+            
+        session = DeepScanSession.objects.get(id=session_id, user=user)
+        
+        # Get recent actions
+        recent_actions = RecordedAction.objects.filter(
+            session=session
+        ).order_by('-timestamp')[:10]
+        
+        actions_data = []
+        for action in recent_actions:
+            actions_data.append({
+                'id': str(action.id),
+                'action_type': action.action_type,
+                'target_element': action.target_element,
+                'url': action.url,
+                'timestamp': action.timestamp,
+                'value': action.value
+            })
+        
+        return Response({
+            'session_id': str(session.id),
+            'status': session.status,
+            'recording_started_at': session.recording_started_at,
+            'actions_count': session.recorded_actions_count,
+            'recent_actions': actions_data
+        })
+        
+    except DeepScanSession.DoesNotExist:
+        return Response(
+            {'error': 'Session not found'},
+            status=status.HTTP_404_NOT_FOUND
+        )
+
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def record_session_actions(request, session_id):
+    """Record multiple actions for a specific session"""
+    try:
+        user = get_user_from_request(request)
+        if not user or not user.is_authenticated:
+            return Response(
+                {'error': 'Authentication required'},
+                status=status.HTTP_401_UNAUTHORIZED
+            )
+        
+        session = DeepScanSession.objects.get(id=session_id, user=user)
+        actions_data = request.data.get('actions', [])
+        
+        # Ensure session is in recording state
+        if session.status != 'recording':
+            session.status = 'recording'
+            if not session.recording_started_at:
+                session.recording_started_at = timezone.now()
+            session.save()
+        
+        created_actions = []
+        for action_data in actions_data:
+            action = RecordedAction.objects.create(
+                session=session,
+                action_type=action_data.get('action_type', 'click'),
+                target_element=action_data.get('target_element', ''),
+                target_selector=action_data.get('target_selector', ''),
+                value=action_data.get('value', ''),
+                url=action_data.get('url', ''),
+                timestamp=action_data.get('timestamp', timezone.now().timestamp()),
+                dom_snapshot=action_data.get('dom_snapshot', {})
+            )
+            created_actions.append(action.id)
+        
+        # Update session action count
+        session.recorded_actions_count = session.actions.count()
+        session.save()
+        
+        return Response({
+            'message': f'{len(created_actions)} actions recorded',
+            'actions_count': len(created_actions),
+            'session_id': str(session.id),
+            'session_status': session.status,
+            'total_actions': session.recorded_actions_count
+        })
+        
+    except DeepScanSession.DoesNotExist:
+        return Response(
+            {'error': 'Session not found'},
+            status=status.HTTP_404_NOT_FOUND
+        )
+    except Exception as e:
+        logger.error(f"Record session actions error: {str(e)}")
+        return Response(
+            {'error': 'Failed to record actions'},
+            status=status.HTTP_500_INTERNAL_SERVER_ERROR
+        )
+
+# In your views.py
+from django.http import FileResponse
+import os
+from django.conf import settings
+
+def download_chrome_extension(request):
+    extension_path = os.path.join(settings.BASE_DIR, 'static', 'downloads', 'GENIUSGAURD-extension-chrome.zip')
+    return FileResponse(open(extension_path, 'rb'), as_attachment=True, filename='GENIUSGAURD-chrome-extension.zip')
+
+def download_firefox_extension(request):
+    extension_path = os.path.join(settings.BASE_DIR, 'static', 'downloads', 'GENIUSGAURD-extension-firefox.zip')
+    return FileResponse(open(extension_path, 'rb'), as_attachment=True, filename='GENIUSGAURD-firefox-extension.zip')
+
+def download_edge_extension(request):
+    extension_path = os.path.join(settings.BASE_DIR, 'static', 'downloads', 'GENIUSGAURD-extension-edge.zip')
+    return FileResponse(open(extension_path, 'rb'), as_attachment=True, filename='GENIUSGAURD-edge-extension.zip')

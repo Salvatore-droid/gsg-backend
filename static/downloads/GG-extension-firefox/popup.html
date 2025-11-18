@@ -1,433 +1,97 @@
 <!DOCTYPE html>
 <html>
 <head>
-    <meta charset="UTF-8">
-    <style>
-        @import url('https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700;900&family=Rajdhani:wght@400;600;700&display=swap');
-        
-        body { 
-            width: 360px; 
-            padding: 0;
-            margin: 0;
-            font-family: 'Rajdhani', sans-serif;
-            background: #000;
-            color: white;
-            overflow: hidden;
-            position: relative;
-        }
-        
-        /* Cyberpunk Background */
-        .cyber-bg {
-            position: absolute;
-            top: 0;
-            left: 0;
-            width: 100%;
-            height: 100%;
-            background: 
-                radial-gradient(circle at 20% 80%, rgba(0, 240, 255, 0.1) 0%, transparent 50%),
-                radial-gradient(circle at 80% 20%, rgba(185, 103, 255, 0.1) 0%, transparent 50%),
-                radial-gradient(circle at 40% 40%, rgba(0, 255, 65, 0.05) 0%, transparent 50%);
-            z-index: -2;
-        }
-        
-        .cyber-grid {
-            position: absolute;
-            top: 0;
-            left: 0;
-            width: 100%;
-            height: 100%;
-            background-image: 
-                linear-gradient(rgba(0, 240, 255, 0.1) 1px, transparent 1px),
-                linear-gradient(90deg, rgba(0, 240, 255, 0.1) 1px, transparent 1px);
-            background-size: 20px 20px;
-            animation: gridMove 20s linear infinite;
-            z-index: -1;
-        }
-        
-        @keyframes gridMove {
-            0% { transform: translate(0, 0); }
-            100% { transform: translate(20px, 20px); }
-        }
-        
-        /* Header */
-        .popup-header {
-            background: rgba(0, 0, 0, 0.8);
-            backdrop-filter: blur(10px);
-            border-bottom: 1px solid #00f0ff;
-            padding: 16px;
-            text-align: center;
-        }
-        
-        .popup-logo {
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            gap: 8px;
-            margin-bottom: 8px;
-        }
-        
-        .logo-icon {
-            width: 24px;
-            height: 24px;
-            filter: drop-shadow(0 0 5px rgba(0, 240, 255, 0.5));
-        }
-        
-        .logo-text {
-            font-family: 'Orbitron', monospace;
-            font-weight: 900;
-            font-size: 1.1rem;
-            background: linear-gradient(135deg, #00f0ff, #b967ff);
-            -webkit-background-clip: text;
-            -webkit-text-fill-color: transparent;
-            letter-spacing: 1px;
-        }
-        
-        .popup-tagline {
-            font-size: 0.75rem;
-            color: #ccc;
-            letter-spacing: 0.5px;
-        }
-        
-        /* Status Indicator */
-        .status-container {
-            padding: 12px 16px;
-            position: relative;
-        }
-        
-        .status-indicator {
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            gap: 8px;
-            padding: 10px 16px;
-            border-radius: 8px;
-            font-weight: 600;
-            font-family: 'Courier New', monospace;
-            font-size: 0.85rem;
-            text-transform: uppercase;
-            letter-spacing: 0.5px;
-            position: relative;
-            overflow: hidden;
-            transition: all 0.3s ease;
-        }
-        
-        .status-indicator::before {
-            content: '';
-            position: absolute;
-            top: 0;
-            left: -100%;
-            width: 100%;
-            height: 100%;
-            background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.1), transparent);
-            transition: left 0.5s ease;
-        }
-        
-        .status-indicator:hover::before {
-            left: 100%;
-        }
-        
-        .status-stopped {
-            background: rgba(220, 53, 69, 0.15);
-            border: 1px solid rgba(220, 53, 69, 0.5);
-            color: #ff6b6b;
-        }
-        
-        .status-recording {
-            background: rgba(40, 167, 69, 0.15);
-            border: 1px solid rgba(40, 167, 69, 0.5);
-            color: #51cf66;
-            animation: pulse 2s infinite;
-        }
-        
-        .status-connected {
-            background: rgba(0, 240, 255, 0.15);
-            border: 1px solid rgba(0, 240, 255, 0.5);
-            color: #00f0ff;
-        }
-        
-        @keyframes pulse {
-            0%, 100% { box-shadow: 0 0 0 0 rgba(40, 167, 69, 0.4); }
-            50% { box-shadow: 0 0 0 6px rgba(40, 167, 69, 0); }
-        }
-        
-        .status-icon {
-            font-size: 0.9rem;
-        }
-        
-        /* Sections */
-        .section {
-            margin: 0 16px 16px;
-            padding: 16px;
-            background: rgba(255, 255, 255, 0.05);
-            backdrop-filter: blur(10px);
-            border: 1px solid rgba(255, 255, 255, 0.1);
-            border-radius: 8px;
-            transition: all 0.3s ease;
-        }
-        
-        .section:hover {
-            border-color: rgba(0, 240, 255, 0.3);
-            box-shadow: 0 5px 15px rgba(0, 240, 255, 0.1);
-        }
-        
-        .section-title {
-            font-family: 'Orbitron', monospace;
-            font-size: 0.9rem;
-            color: #00f0ff;
-            margin: 0 0 12px 0;
-            text-transform: uppercase;
-            letter-spacing: 1px;
-            display: flex;
-            align-items: center;
-            gap: 6px;
-        }
-        
-        .section-title::after {
-            content: '';
-            flex: 1;
-            height: 1px;
-            background: linear-gradient(90deg, #00f0ff, transparent);
-            margin-left: 8px;
-        }
-        
-        /* Inputs */
-        .cyber-input {
-            width: 100%;
-            padding: 10px 12px;
-            background: rgba(255, 255, 255, 0.05);
-            border: 1px solid rgba(0, 240, 255, 0.3);
-            border-radius: 6px;
-            color: white;
-            font-family: 'Courier New', monospace;
-            font-size: 0.85rem;
-            margin-bottom: 10px;
-            outline: none;
-            transition: all 0.3s ease;
-            box-sizing: border-box;
-        }
-        
-        .cyber-input:focus {
-            box-shadow: 0 0 0 2px rgba(0, 240, 255, 0.1), 0 0 8px rgba(0, 240, 255, 0.3);
-            background: rgba(255, 255, 255, 0.08);
-        }
-        
-        .cyber-input::placeholder {
-            color: #888;
-        }
-        
-        /* Buttons */
-        .btn {
-            width: 100%;
-            padding: 12px;
-            border: none;
-            border-radius: 6px;
-            font-family: 'Orbitron', monospace;
-            font-weight: 700;
-            font-size: 0.85rem;
-            text-transform: uppercase;
-            letter-spacing: 1px;
-            cursor: pointer;
-            transition: all 0.3s ease;
-            position: relative;
-            overflow: hidden;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            gap: 6px;
-            margin-bottom: 8px;
-        }
-        
-        .btn::before {
-            content: '';
-            position: absolute;
-            top: 0;
-            left: -100%;
-            width: 100%;
-            height: 100%;
-            background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.2), transparent);
-            transition: left 0.5s ease;
-        }
-        
-        .btn:hover::before {
-            left: 100%;
-        }
-        
-        .btn-primary {
-            background: linear-gradient(135deg, #00f0ff, #b967ff);
-            color: black;
-        }
-        
-        .btn-primary:hover {
-            transform: translateY(-2px);
-            box-shadow: 0 5px 15px rgba(0, 240, 255, 0.3);
-        }
-        
-        .btn-danger {
-            background: linear-gradient(135deg, #ff416c, #ff4b2b);
-            color: white;
-        }
-        
-        .btn-danger:hover {
-            transform: translateY(-2px);
-            box-shadow: 0 5px 15px rgba(255, 65, 108, 0.3);
-        }
-        
-        .btn-secondary {
-            background: transparent;
-            border: 1px solid #b967ff;
-            color: #b967ff;
-        }
-        
-        .btn-secondary:hover {
-            background: rgba(185, 103, 255, 0.1);
-            box-shadow: 0 0 15px rgba(185, 103, 255, 0.3);
-        }
-        
-        .btn:disabled {
-            opacity: 0.5;
-            cursor: not-allowed;
-            transform: none !important;
-            box-shadow: none !important;
-        }
-        
-        .btn-icon {
-            font-size: 1rem;
-        }
-        
-        /* Footer */
-        .popup-footer {
-            padding: 12px 16px;
-            text-align: center;
-            font-size: 0.7rem;
-            color: #666;
-            border-top: 1px solid rgba(255, 255, 255, 0.1);
-        }
-        
-        /* Hidden State */
-        .hidden {
-            display: none;
-        }
-        
-        /* Recording Info */
-        .info-grid {
-            display: grid;
-            grid-template-columns: 1fr 1fr;
-            gap: 10px;
-        }
-        
-        .info-item {
-            display: flex;
-            flex-direction: column;
-            gap: 4px;
-        }
-        
-        .info-label {
-            font-size: 0.75rem;
-            color: #888;
-            text-transform: uppercase;
-            letter-spacing: 0.5px;
-        }
-        
-        .info-value {
-            font-family: 'Courier New', monospace;
-            font-size: 0.9rem;
-            font-weight: 600;
-            color: #00f0ff;
-            word-break: break-all;
-        }
-        
-        /* Scrollbar Styling */
-        ::-webkit-scrollbar {
-            width: 6px;
-        }
-        
-        ::-webkit-scrollbar-track {
-            background: rgba(255, 255, 255, 0.05);
-            border-radius: 3px;
-        }
-        
-        ::-webkit-scrollbar-thumb {
-            background: rgba(0, 240, 255, 0.3);
-            border-radius: 3px;
-        }
-        
-        ::-webkit-scrollbar-thumb:hover {
-            background: rgba(0, 240, 255, 0.5);
-        }
-    </style>
+  <meta charset="utf-8">
+  <style>
+    body { 
+      width: 300px; 
+      padding: 16px; 
+      font-family: Arial, sans-serif; 
+      background: #1a1a1a;
+      color: white;
+      margin: 0;
+    }
+    .status { 
+      padding: 12px; 
+      border-radius: 6px; 
+      margin-bottom: 12px; 
+      text-align: center;
+      font-weight: bold;
+      border: 2px solid;
+    }
+    .connected { 
+      background: #1e3a1e; 
+      color: #4ade80;
+      border-color: #4ade80;
+    }
+    .disconnected { 
+      background: #3a1e1e; 
+      color: #f87171;
+      border-color: #f87171;
+    }
+    .recording { 
+      background: #3a3a1e; 
+      color: #fde047;
+      border-color: #fde047;
+      animation: pulse 2s infinite;
+    }
+    @keyframes pulse {
+      0%, 100% { opacity: 1; }
+      50% { opacity: 0.7; }
+    }
+    button { 
+      width: 100%; 
+      padding: 10px; 
+      margin: 6px 0; 
+      border: none; 
+      border-radius: 6px; 
+      cursor: pointer;
+      font-weight: bold;
+      transition: all 0.2s;
+    }
+    button:hover {
+      transform: translateY(-1px);
+    }
+    .btn-primary { 
+      background: #3b82f6; 
+      color: white; 
+    }
+    .btn-primary:disabled {
+      background: #6b7280;
+      cursor: not-allowed;
+      transform: none;
+    }
+    .btn-danger { 
+      background: #ef4444; 
+      color: white; 
+    }
+    .btn-danger:disabled {
+      background: #6b7280;
+      cursor: not-allowed;
+      transform: none;
+    }
+    .session-info {
+      background: #2d2d2d;
+      padding: 8px;
+      border-radius: 4px;
+      margin: 8px 0;
+      font-size: 12px;
+      word-break: break-all;
+    }
+  </style>
 </head>
 <body>
-    <div class="cyber-bg"></div>
-    <div class="cyber-grid"></div>
-    
-    <div class="popup-header">
-        <div class="popup-logo">
-            <!-- Logo would be loaded from extension assets -->
-            <div class="logo-icon">🛡️</div>
-            <span class="logo-text">GENIUSGUARD</span>
-        </div>
-        <div class="popup-tagline">QUANTUM SECURITY EXTENSION</div>
-    </div>
-    
-    <div class="status-container">
-        <div id="status" class="status-indicator status-stopped">
-            <span class="status-icon">🔴</span>
-            <span id="status-text">SECURITY INACTIVE</span>
-        </div>
-    </div>
-    
-    <div id="auth-section" class="section">
-        <div class="section-title">🛡️ AUTHENTICATION</div>
-        <input type="text" id="backend-url" class="cyber-input" placeholder="https://api.geniusguard.com" value="http://localhost:8000">
-        <input type="text" id="auth-token" class="cyber-input" placeholder="Enter your security token">
-        <button id="save-settings" class="btn btn-primary">
-            <span class="btn-icon">💾</span>
-            SAVE SETTINGS
-        </button>
-    </div>
-    
-    <div class="section">
-        <div class="section-title">⚡ SECURITY CONTROLS</div>
-        <button id="start-recording" class="btn btn-primary">
-            <span class="btn-icon">🔴</span>
-            START RECORDING
-        </button>
-        <button id="stop-recording" class="btn btn-danger" disabled>
-            <span class="btn-icon">⏹️</span>
-            STOP RECORDING
-        </button>
-        <button id="quick-scan" class="btn btn-secondary">
-            <span class="btn-icon">🔍</span>
-            QUICK SCAN
-        </button>
-    </div>
-    
-    <div id="recording-info" class="section hidden">
-        <div class="section-title">📊 LIVE SESSION</div>
-        <div class="info-grid">
-            <div class="info-item">
-                <div class="info-label">Session ID</div>
-                <div id="session-id" class="info-value">-</div>
-            </div>
-            <div class="info-item">
-                <div class="info-label">Actions</div>
-                <div id="actions-count" class="info-value">0</div>
-            </div>
-            <div class="info-item">
-                <div class="info-label">Duration</div>
-                <div id="session-duration" class="info-value">00:00</div>
-            </div>
-            <div class="info-item">
-                <div class="info-label">Threats</div>
-                <div id="threats-count" class="info-value">0</div>
-            </div>
-        </div>
-    </div>
-    
-    <div class="popup-footer">
-        GENIUSGUARD SECURITY EXTENSION v2.0
-    </div>
-    
-    <script src="popup.js"></script>
+  <div class="status" id="status">Checking connection...</div>
+  
+  <div id="controls">
+    <button id="startBtn" class="btn-primary">Start Recording</button>
+    <button id="stopBtn" class="btn-danger" disabled>Stop Recording</button>
+  </div>
+  
+  <div class="session-info" id="sessionInfo" style="display: none;">
+    Session: <span id="sessionId"></span>
+  </div>
+  
+  <script src="popup.js"></script>
 </body>
 </html>

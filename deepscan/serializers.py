@@ -3,6 +3,7 @@ from .models import (
     DeepScanSession, ScanModule, DeepScanFinding, 
     BrowserExtensionSession, RecordedAction, DeepScanReport
 )
+from base.models import ScanTarget
 
 class RecordedActionSerializer(serializers.ModelSerializer):
     class Meta:
@@ -18,8 +19,8 @@ class BrowserExtensionSessionSerializer(serializers.ModelSerializer):
 
 class DeepScanSessionSerializer(serializers.ModelSerializer):
     recorded_actions = RecordedActionSerializer(many=True, read_only=True)
-    target_url = serializers.CharField(source='target.url', read_only=True)
-    target_name = serializers.CharField(source='target.name', read_only=True)
+    target_url = serializers.CharField(source='target.url', read_only=True, allow_null=True)
+    target_name = serializers.CharField(source='target.name', read_only=True, allow_null=True)
     
     class Meta:
         model = DeepScanSession
@@ -29,6 +30,18 @@ class DeepScanSessionSerializer(serializers.ModelSerializer):
             'recording_completed_at', 'scan_started_at', 'scan_completed_at',
             'progress', 'status', 'total_vulnerabilities', 'risk_score'
         )
+        extra_kwargs = {
+            'target': {'required': False, 'allow_null': True}
+        }
+    
+    def create(self, validated_data):
+        # Handle target separately - it's optional
+        target = validated_data.pop('target', None)
+        instance = DeepScanSession.objects.create(**validated_data)
+        if target:
+            instance.target = target
+            instance.save()
+        return instance
 
 class ScanModuleSerializer(serializers.ModelSerializer):
     class Meta:
@@ -46,7 +59,7 @@ class DeepScanFindingSerializer(serializers.ModelSerializer):
 
 class DeepScanReportSerializer(serializers.ModelSerializer):
     session_name = serializers.CharField(source='session.name', read_only=True)
-    target_url = serializers.CharField(source='session.target.url', read_only=True)
+    target_url = serializers.CharField(source='session.target.url', read_only=True, allow_null=True)
     
     class Meta:
         model = DeepScanReport
@@ -84,3 +97,15 @@ class DeepScanProgressSerializer(serializers.Serializer):
     progress = serializers.FloatField(min_value=0, max_value=100)
     current_module = serializers.CharField(required=False)
     status = serializers.CharField()
+
+# ADD THIS NEW SERIALIZER FOR CREATING SESSIONS WITHOUT TARGET
+class DeepScanSessionCreateSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = DeepScanSession
+        fields = ['name', 'description', 'scan_intensity', 'target']
+        extra_kwargs = {
+            'target': {'required': False, 'allow_null': True},
+            'name': {'required': True},
+            'description': {'required': False, 'allow_blank': True},
+            'scan_intensity': {'required': False, 'default': 'standard'}
+        }

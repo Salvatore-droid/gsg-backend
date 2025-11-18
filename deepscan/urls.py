@@ -20,4 +20,15 @@ urlpatterns = [
     path('actions/record/', views.RecordedActionViewSet.as_view({'post': 'create'}), name='record-action'),
     path('recorded-actions/bulk/', views.BulkRecordedActionView.as_view(), name='bulk-recorded-actions'),
     path('auth/user/', views.get_user_info, name='get-user-info'),
+    
+    # Add this fallback user endpoint
+    path('user/', views.get_user_info, name='deepscan-user'),
+    
+    # NEW ENDPOINTS FOR SIMPLIFIED RECORDING FLOW
+    path('sessions/start-recording/', views.start_direct_recording, name='start-direct-recording'),
+    path('sessions/save-recording/', views.save_recording_session, name='save-recording-session'),
+    path('sessions/<uuid:session_id>/recording-status/', views.get_recording_status, name='get-recording-status'),
+    
+    # Enhanced recording actions endpoint
+    path('sessions/<uuid:session_id>/record-actions/', views.record_session_actions, name='record-session-actions'),
 ]
