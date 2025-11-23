@@ -1,3 +1,4 @@
+# In your urls.py
 from django.urls import path, include
 from rest_framework.routers import DefaultRouter
 from django.http import JsonResponse
@@ -31,4 +32,10 @@ urlpatterns = [
     
     # Enhanced recording actions endpoint
     path('sessions/<uuid:session_id>/record-actions/', views.record_session_actions, name='record-session-actions'),
+    
+    # DOWNLOAD ENDPOINTS - ADD THESE
+    path('download/chrome-extension/', views.download_chrome_extension, name='download-chrome-extension'),
+    path('download/firefox-extension/', views.download_firefox_extension, name='download-firefox-extension'),
+    path('download/edge-extension/', views.download_edge_extension, name='download-edge-extension'),
+    path('download/availability/', views.check_extension_availability, name='check-extension-availability'),
 ]

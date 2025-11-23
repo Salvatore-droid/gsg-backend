@@ -9,33 +9,32 @@ from django.core.cache import cache
 import asyncio
 import re
 import logging
-from .models import ScanTarget, ScanResult, Vulnerability, ThreatIntelligence, GlobalStats
-from .serializers import (
-    ScanTargetSerializer, ScanResultSerializer, 
-    ThreatIntelligenceSerializer, GlobalStatsSerializer,
-    QuickScanResponseSerializer, ThreatIntelFeedSerializer
-)
+from .models import *
+from .serializers import *
+
+from rest_framework.permissions import IsAuthenticated, AllowAny
+from rest_framework.views import APIView
+from django.contrib.auth import get_user_model
+import requests
+import socket
+import ssl
+import json
+from urllib.parse import urlparse
 from .permissions import ScanPermission
 from .utils.security_tools import SecurityScanner
 from .utils.threat_intelligence import ThreatIntelligenceService
 
 logger = logging.getLogger(__name__)
 
-from rest_framework.permissions import IsAuthenticated, AllowAny
-from rest_framework.views import APIView
-from django.contrib.auth import get_user_model
-
 User = get_user_model()
 
 from rest_framework.decorators import api_view, permission_classes
 from rest_framework.response import Response
 from rest_framework import status
-from rest_framework.permissions import AllowAny
 from django.contrib.auth import authenticate
 from django.contrib.auth.models import User
 import jwt
 from datetime import datetime, timedelta
-from django.conf import settings
 
 @api_view(['POST'])
 @permission_classes([AllowAny])
@@ -439,76 +438,18 @@ class ThreatIntelligenceViewSet(viewsets.ReadOnlyModelViewSet):
     permission_classes = [AllowAny]
     
     @action(detail=False, methods=['get'])
-    def live_feed(self, request):  # Remove async
-        """Get real-time threat intelligence feed"""
+    def live_feed(self, request):
+        """Get real threat intelligence from database"""
         try:
-            # For now, return mock data
-            threats = [
-                {
-                    'id': 1,
-                    'title': 'Cross-Site Scripting Attack',
-                    'description': 'XSS vulnerability detected in multiple web applications',
-                    'severity': 'high',
-                    'detected_at': timezone.now(),
-                    'source': 'internal',
-                    'confidence_score': 0.8
-                },
-                {
-                    'id': 2,
-                    'title': 'SQL Injection Attempt',
-                    'description': 'SQL injection patterns detected in database queries',
-                    'severity': 'critical',
-                    'detected_at': timezone.now() - timezone.timedelta(minutes=5),
-                    'source': 'external',
-                    'confidence_score': 0.9
-                },
-                {
-                    'id': 3,
-                    'title': 'Remote Code Execution',
-                    'description': 'Potential RCE vulnerability in file upload functionality',
-                    'severity': 'critical',
-                    'detected_at': timezone.now() - timezone.timedelta(minutes=8),
-                    'source': 'internal',
-                    'confidence_score': 0.7
-                },
-                {
-                    'id': 4,
-                    'title': 'CSRF Vulnerability',
-                    'description': 'Cross-Site Request Forgery vulnerability in form submissions',
-                    'severity': 'medium',
-                    'detected_at': timezone.now() - timezone.timedelta(minutes=12),
-                    'source': 'external',
-                    'confidence_score': 0.6
-                },
-                {
-                    'id': 5,
-                    'title': 'Local File Inclusion',
-                    'description': 'LFI vulnerability in file path parameters',
-                    'severity': 'high',
-                    'detected_at': timezone.now() - timezone.timedelta(minutes=15),
-                    'source': 'internal',
-                    'confidence_score': 0.8
-                }
-            ]
+            # Get real threats from database
+            threats = ThreatIntelligence.objects.filter(
+                is_active=True
+            ).order_by('-detected_at')[:20]  # Limit to 20 most recent
             
-            # Update local threat intelligence with mock data
-            for threat in threats:
-                ThreatIntelligence.objects.update_or_create(
-                    threat_id=threat['id'],
-                    defaults={
-                        'title': threat['title'],
-                        'description': threat['description'],
-                        'severity': threat['severity'],
-                        'detected_at': threat['detected_at'],
-                        'source': threat['source'],
-                        'confidence_score': threat['confidence_score'],
-                        'is_active': True
-                    }
-                )
+            # Auto-create some realistic threats based on recent vulnerabilities
+            self._generate_realistic_threats()
             
-            # Return latest threats
-            latest_threats = ThreatIntelligence.objects.filter(is_active=True).order_by('-detected_at')[:10]
-            serializer = self.get_serializer(latest_threats, many=True)
+            serializer = self.get_serializer(threats, many=True)
             return Response(serializer.data)
             
         except Exception as e:
@@ -517,41 +458,116 @@ class ThreatIntelligenceViewSet(viewsets.ReadOnlyModelViewSet):
                 {'error': 'Failed to fetch threat feed'},
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR
             )
+    
+    def _generate_realistic_threats(self):
+        """Generate realistic threats based on actual scan data"""
+        try:
+            # Get recent vulnerabilities to create threat intelligence
+            recent_vulnerabilities = Vulnerability.objects.filter(
+                created_at__gte=timezone.now() - timezone.timedelta(hours=24)
+            ).select_related('scan_result')
+            
+            threat_map = {
+                'xss': 'Cross-Site Scripting',
+                'sqli': 'SQL Injection',
+                'rce': 'Remote Code Execution',
+                'csrf': 'Cross-Site Request Forgery',
+                'lfi': 'Local File Inclusion'
+            }
+            
+            for vuln in recent_vulnerabilities:
+                # Create threat intelligence from high/critical vulnerabilities
+                if vuln.severity in ['high', 'critical']:
+                    threat_type = self._detect_threat_type(vuln.title.lower())
+                    
+                    threat_data = {
+                        'threat_id': f"THREAT-{vuln.id}",
+                        'title': f"{threat_map.get(threat_type, 'Security')} Threat Detected",
+                        'description': f"{vuln.severity.upper()} severity {threat_type.upper()} vulnerability found in recent scan",
+                        'severity': vuln.severity,
+                        'source': 'internal_scan',
+                        'confidence_score': 85.0,
+                        'is_active': True
+                    }
+                    
+                    # Create or update threat intelligence
+                    ThreatIntelligence.objects.update_or_create(
+                        threat_id=threat_data['threat_id'],
+                        defaults={
+                            **threat_data,
+                            'detected_at': vuln.created_at or timezone.now()
+                        }
+                    )
+                    
+        except Exception as e:
+            logger.warning(f"Error generating realistic threats: {str(e)}")
+    
+    def _detect_threat_type(self, title):
+        """Detect threat type from vulnerability title"""
+        if 'xss' in title or 'cross-site' in title:
+            return 'xss'
+        elif 'sql' in title or 'injection' in title:
+            return 'sqli'
+        elif 'remote code' in title or 'rce' in title:
+            return 'rce'
+        elif 'csrf' in title or 'cross-site request' in title:
+            return 'csrf'
+        elif 'file inclusion' in title or 'lfi' in title:
+            return 'lfi'
+        else:
+            return 'security'
 
 class GlobalStatsViewSet(viewsets.ReadOnlyModelViewSet):
-    queryset = GlobalStats.objects.all().order_by('id')  # Add ordering to fix pagination warning
+    queryset = GlobalStats.objects.all().order_by('id')
     serializer_class = GlobalStatsSerializer
     permission_classes = [AllowAny]
+    
+    def list(self, request):
+        """Override list to calculate real-time statistics"""
+        try:
+            # Calculate real statistics from database
+            total_scans = ScanResult.objects.count()
+            high_risk_scans = ScanResult.objects.filter(
+                risk_score__gte=70,
+                status='completed'
+            ).count()
+            
+            total_vulnerabilities = Vulnerability.objects.count()
+            
+            # Update or create global stats
+            stats, created = GlobalStats.objects.get_or_create(pk=1)
+            stats.total_scans = total_scans
+            stats.high_risk_scans = high_risk_scans
+            stats.total_vulnerabilities_found = total_vulnerabilities
+            
+            # Calculate average scan duration
+            completed_scans = ScanResult.objects.filter(
+                status='completed',
+                scan_duration__isnull=False
+            )
+            if completed_scans.exists():
+                avg_duration = completed_scans.aggregate(
+                    avg_duration=models.Avg('scan_duration')
+                )['avg_duration'] or 0.0
+                stats.average_scan_duration = round(avg_duration, 2)
+            
+            stats.save()
+            
+            serializer = self.get_serializer(stats)
+            return Response(serializer.data)
+            
+        except Exception as e:
+            logger.error(f"Error fetching global stats: {str(e)}")
+            return Response(
+                {'error': 'Failed to fetch statistics'},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
 
-from rest_framework import viewsets, status, generics
-from rest_framework.decorators import action
-from rest_framework.response import Response
-from rest_framework.permissions import IsAuthenticated, AllowAny
-from rest_framework.views import APIView
-from django.utils import timezone
-from django.conf import settings
-from django.core.cache import cache
-import asyncio
-import logging
-import requests
-import socket
-import ssl
-import json
-from urllib.parse import urlparse
-from .models import ScanTarget, ScanResult, Vulnerability, ThreatIntelligence, GlobalStats
-from .serializers import (
-    ScanTargetSerializer, ScanResultSerializer, 
-    ThreatIntelligenceSerializer, GlobalStatsSerializer,
-    QuickScanResponseSerializer, ThreatIntelFeedSerializer
-)
-from .permissions import ScanPermission
-from .utils.security_tools import SecurityScanner
-from .utils.threat_intelligence import ThreatIntelligenceService
 
-logger = logging.getLogger(__name__)
+
+# In your views.py - update QuickScanViewSet
 
 class QuickScanViewSet(viewsets.ViewSet):
-    """Limited functionality scanner for unauthenticated users"""
     permission_classes = [AllowAny]
     
     def create(self, request):
@@ -576,8 +592,46 @@ class QuickScanViewSet(viewsets.ViewSet):
             )
         
         try:
+            # Create scan target for unauthenticated users
+            scan_target = ScanTarget.objects.create(
+                url=url,
+                name=f"Quick Scan - {url}",
+                scan_type='quick',
+                is_active=False  # Mark as inactive for demo scans
+            )
+            
+            # Create scan result
+            scan_result = ScanResult.objects.create(
+                target=scan_target,
+                status='scanning'
+            )
+            
             # Perform real security scan
             scan_results = self.perform_quick_scan(url)
+            
+            # Update scan result with real data
+            scan_result.status = 'completed'
+            scan_result.risk_score = scan_results['risk_score']
+            scan_result.total_vulnerabilities = len(scan_results['vulnerabilities'])
+            scan_result.scan_duration = scan_results['scan_duration']
+            scan_result.raw_data = scan_results
+            scan_result.completed_at = timezone.now()
+            scan_result.save()
+            
+            # Create vulnerability records
+            for vuln_data in scan_results['vulnerabilities']:
+                Vulnerability.objects.create(
+                    scan_result=scan_result,
+                    title=vuln_data['title'],
+                    description=vuln_data['description'],
+                    severity=vuln_data['severity'],
+                    cvss_score=vuln_data.get('cvss_score', 0.0),
+                    evidence=vuln_data.get('evidence', ''),
+                    recommendation=vuln_data.get('recommendation', '')
+                )
+            
+            # Update global stats
+            self._update_global_stats()
             
             response_data = {
                 'url': url,
@@ -585,7 +639,8 @@ class QuickScanViewSet(viewsets.ViewSet):
                 'findings': scan_results,
                 'risk_score': scan_results['risk_score'],
                 'total_vulnerabilities': len(scan_results['vulnerabilities']),
-                'scan_duration': scan_results['scan_duration']
+                'scan_duration': scan_results['scan_duration'],
+                'scan_id': str(scan_result.id)
             }
             
             serializer = QuickScanResponseSerializer(response_data)
@@ -597,6 +652,20 @@ class QuickScanViewSet(viewsets.ViewSet):
                 {'error': f'Scan failed: {str(e)}'},
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR
             )
+    
+    def _update_global_stats(self):
+        """Update global statistics"""
+        try:
+            stats, created = GlobalStats.objects.get_or_create(pk=1)
+            stats.total_scans = ScanResult.objects.count()
+            stats.high_risk_scans = ScanResult.objects.filter(
+                risk_score__gte=70,
+                status='completed'
+            ).count()
+            stats.total_vulnerabilities_found = Vulnerability.objects.count()
+            stats.save()
+        except Exception as e:
+            logger.error(f"Failed to update global stats: {str(e)}")
     
     def perform_quick_scan(self, url):
         """Perform actual security scanning on the target URL"""
@@ -1007,3 +1076,62 @@ def health_check(request):
         'timestamp': timezone.now().isoformat(),
         'version': '1.0.0'
     })
+
+# In views.py - add these additional views
+
+class ScanStatsView(APIView):
+    permission_classes = [AllowAny]
+    
+    def get(self, request):
+        """Get real-time scan statistics"""
+        total_scans = ScanResult.objects.count()
+        high_risk_scans = ScanResult.objects.filter(risk_score__gte=70).count()
+        total_vulnerabilities = Vulnerability.objects.count()
+        
+        return Response({
+            'total_scans': total_scans,
+            'high_risk_scans': high_risk_scans,
+            'total_vulnerabilities_found': total_vulnerabilities
+        })
+
+class RecentVulnerabilitiesView(APIView):
+    permission_classes = [AllowAny]
+    
+    def get(self, request):
+        """Get recent vulnerabilities for threat feed"""
+        recent_vulns = Vulnerability.objects.filter(
+            created_at__gte=timezone.now() - timezone.timedelta(hours=24)
+        ).order_by('-created_at')[:10]
+        
+        data = []
+        for vuln in recent_vulns:
+            data.append({
+                'id': vuln.id,
+                'title': vuln.title,
+                'description': vuln.description,
+                'severity': vuln.severity,
+                'created_at': vuln.created_at
+            })
+        
+        return Response(data)
+
+class ActiveThreatsView(APIView):
+    permission_classes = [AllowAny]
+    
+    def get(self, request):
+        """Get active threats from database"""
+        active_threats = ThreatIntelligence.objects.filter(
+            is_active=True
+        ).order_by('-detected_at')[:10]
+        
+        data = []
+        for threat in active_threats:
+            data.append({
+                'id': threat.id,
+                'type': threat.title.split(' ')[0].upper(),
+                'title': threat.title,
+                'detected_at': threat.detected_at,
+                'severity': threat.severity
+            })
+        
+        return Response(data)

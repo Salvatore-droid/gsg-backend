@@ -1014,18 +1014,82 @@ def record_session_actions(request, session_id):
         )
 
 # In your views.py
-from django.http import FileResponse
+# In your Django views.py
 import os
+from django.http import JsonResponse, FileResponse
 from django.conf import settings
-
-def download_chrome_extension(request):
-    extension_path = os.path.join(settings.BASE_DIR, 'static', 'downloads', 'GENIUSGAURD-extension-chrome.zip')
-    return FileResponse(open(extension_path, 'rb'), as_attachment=True, filename='GENIUSGAURD-chrome-extension.zip')
+from pathlib import Path
 
 def download_firefox_extension(request):
-    extension_path = os.path.join(settings.BASE_DIR, 'static', 'downloads', 'GENIUSGAURD-extension-firefox.zip')
-    return FileResponse(open(extension_path, 'rb'), as_attachment=True, filename='GENIUSGAURD-firefox-extension.zip')
+    return download_extension(request, 'firefox')
+
+def download_chrome_extension(request):
+    return download_extension(request, 'chrome')
 
 def download_edge_extension(request):
-    extension_path = os.path.join(settings.BASE_DIR, 'static', 'downloads', 'GENIUSGAURD-extension-edge.zip')
-    return FileResponse(open(extension_path, 'rb'), as_attachment=True, filename='GENIUSGAURD-edge-extension.zip')
+    return download_extension(request, 'edge')
+
+# In views.py - update the download_extension function
+def download_extension(request, browser):
+    # Map browsers to their file names
+    extension_files = {
+        'firefox': 'GENIUSGAURD-extension-firefox.zip',
+        'chrome': 'GENIUSGAURD-extension-chrome.zip', 
+        'edge': 'GENIUSGAURD-extension-edge.zip'
+    }
+    
+    filename = extension_files.get(browser)
+    if not filename:
+        return JsonResponse({'error': 'Unsupported browser'}, status=400)
+    
+    # Path to the extension file
+    extension_path = os.path.join(settings.BASE_DIR, 'static', 'downloads', filename)
+    
+    # Check if file exists, if not, build it
+    if not os.path.exists(extension_path):
+        # Try to build the extension
+        try:
+            from build_extensions import main
+            main()  # This will create the extension packages
+        except Exception as e:
+            logger.error(f"Failed to build extensions: {e}")
+            return JsonResponse({
+                'error': f'{browser.capitalize()} extension not available',
+                'message': 'Extension package could not be built. Please try again later.',
+                'browser': browser,
+                'status': 'build_failed'
+            }, status=404)
+    
+    # Check again after potential build
+    if not os.path.exists(extension_path):
+        return JsonResponse({
+            'error': f'{browser.capitalize()} extension not available for download',
+            'message': 'The extension package is still being prepared. Please check back later.',
+            'browser': browser,
+            'status': 'not_available'
+        }, status=404)
+    
+    try:
+        # Serve the file
+        response = FileResponse(open(extension_path, 'rb'), as_attachment=True, filename=filename)
+        return response
+    except Exception as e:
+        return JsonResponse({'error': f'Failed to serve file: {str(e)}'}, status=500)
+
+@api_view(['GET'])
+@permission_classes([AllowAny])
+def check_extension_availability(request):
+    """Check if extension downloads are available"""
+    browsers = ['firefox', 'chrome', 'edge']
+    availability = {}
+    
+    for browser in browsers:
+        filename = f'GENIUSGAURD-extension-{browser}.zip'
+        extension_path = os.path.join(settings.BASE_DIR, 'static', 'downloads', filename)
+        availability[browser] = os.path.exists(extension_path)
+    
+    return JsonResponse({
+        'available': availability,
+        'message': 'Extension download availability status',
+        'manual_installation_available': True
+    })

@@ -1,0 +1,35 @@
+{
+    "manifest_version": 3,
+    "name": "GENIUSGAURD Security Scanner",
+    "version": "1.0.0",
+    "description": "Record browser sessions for security testing with GeniusGuard",
+    "permissions": [
+      "activeTab",
+      "storage",
+      "scripting",
+      "webNavigation"
+    ],
+    "host_permissions": [
+      "http://*/*",
+      "https://*/*"
+    ],
+    "background": {
+      "service_worker": "background.js"
+    },
+    "content_scripts": [
+      {
+        "matches": ["http://*/*", "https://*/*"],
+        "js": ["content.js"],
+        "run_at": "document_end"
+      }
+    ],
+    "action": {
+      "default_popup": "popup.html",
+      "default_title": "GENIUSGAURD Security"
+    },
+    "icons": {
+      "16": "icons/icon16.png",
+      "48": "icons/icon48.png",
+      "128": "icons/icon128.png"
+    }
+  }
